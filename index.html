@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ANOVA Explorer</title>
+<style>
+  :root { --bg:#f6f7fb; --card:#fff; --text:#20242b; --muted:#667085; --border:#d9dde5; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:Arial,Helvetica,sans-serif; background:var(--bg); color:var(--text); }
+  .wrap { max-width:1100px; margin:0 auto; padding:28px 18px 45px; }
+  h1 { margin:0 0 8px; font-size:30px; }
+  h2 { margin:0 0 12px; font-size:20px; }
+  p { line-height:1.5; }
+  .intro { color:var(--muted); margin-bottom:20px; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:18px; box-shadow:0 2px 8px rgba(0,0,0,.04); }
+  .groups { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+  .group { border:1px solid var(--border); border-radius:10px; padding:12px; }
+  .group h3 { margin:0 0 10px; font-size:16px; }
+  .obs { display:grid; grid-template-columns:1fr 72px; gap:7px; align-items:center; margin:7px 0; }
+  input[type=number] { width:72px; padding:6px; border:1px solid var(--border); border-radius:6px; }
+  input[type=range] { width:100%; }
+  .stats { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+  .metric { border:1px solid var(--border); border-radius:9px; padding:11px; }
+  .metric .label { color:var(--muted); font-size:12px; }
+  .metric .value { font-size:21px; font-weight:700; margin-top:3px; }
+  table { width:100%; border-collapse:collapse; }
+  th,td { padding:9px 7px; border-bottom:1px solid var(--border); text-align:right; }
+  th:first-child,td:first-child { text-align:left; }
+  .controls { display:flex; gap:9px; flex-wrap:wrap; margin-top:12px; }
+  button { border:1px solid #b8bec9; background:#fff; border-radius:8px; padding:9px 13px; cursor:pointer; font-weight:600; }
+  button:hover { background:#f0f2f6; }
+  .answer { background:#f1f3f7; border-radius:9px; padding:12px; margin-top:12px; }
+  .canvas-wrap { overflow:auto; }
+  canvas { display:block; width:100%; max-width:100%; background:#fff; border:1px solid var(--border); border-radius:9px; }
+  .question { margin:0 0 9px; }
+  textarea { width:100%; min-height:80px; resize:vertical; padding:9px; border:1px solid var(--border); border-radius:8px; font:inherit; }
+  .small { color:var(--muted); font-size:13px; }
+  @media (max-width:800px) {
+    .grid,.groups { grid-template-columns:1fr; }
+    .stats { grid-template-columns:1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>ANOVA Explorer</h1>
+  <p class="intro">Change the observations and watch the one-way ANOVA change. Focus on the distinction between <b>between-group variation</b> and <b>within-group variation</b>.</p>
+
+  <div class="card">
+    <h2>1. Change the data</h2>
+    <div class="groups" id="groups"></div>
+    <div class="controls">
+      <button id="randomize">Generate New Data</button>
+      <button id="reset">Reset Example</button>
+    </div>
+  </div>
+
+  <div class="grid" style="margin-top:16px">
+    <div class="card">
+      <h2>2. What do the groups look like?</h2>
+      <div class="canvas-wrap"><canvas id="plot" width="720" height="360"></canvas></div>
+      <p class="small">Each dot is an observation. The horizontal line within each group marks its mean. The dashed line marks the grand mean.</p>
+    </div>
+
+    <div class="card">
+      <h2>3. ANOVA results</h2>
+      <div class="stats">
+        <div class="metric"><div class="label">Grand mean</div><div class="value" id="grand"></div></div>
+        <div class="metric"><div class="label">F statistic</div><div class="value" id="f"></div></div>
+        <div class="metric"><div class="label">p-value</div><div class="value" id="p"></div></div>
+      </div>
+      <div style="margin-top:15px">
+        <table>
+          <thead><tr><th>Source</th><th>SS</th><th>df</th><th>MS</th><th>F</th></tr></thead>
+          <tbody id="anova"></tbody>
+        </table>
+      </div>
+      <div class="answer" id="conclusion"></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h2>4. Defend your analysis</h2>
+    <p class="question"><b>Question 1:</b> If the F statistic increases, what does that tell you about between-group variation relative to within-group variation?</p>
+    <textarea placeholder="Type your answer..."></textarea>
+    <p class="question" style="margin-top:15px"><b>Question 2:</b> If the ANOVA is significant, what can you conclude—and what can you NOT conclude—from the omnibus test alone?</p>
+    <textarea placeholder="Type your answer..."></textarea>
+    <p class="question" style="margin-top:15px"><b>Question 3:</b> Change one observation substantially. Explain what happened to the F statistic and why.</p>
+    <textarea placeholder="Type your answer..."></textarea>
+  </div>
+</div>
+
+<script>
+const defaults = [
+  [32,36,38,40,43,45],
+  [44,47,49,51,53,56],
+  [55,58,60,62,65,66]
+];
+let data = defaults.map(g => [...g]);
+const names = ["Group A","Group B","Group C"];
+
+function mean(a){ return a.reduce((s,x)=>s+x,0)/a.length; }
+
+function renderInputs(){
+  const root=document.getElementById("groups");
+  root.innerHTML="";
+  data.forEach((g,gi)=>{
+    const box=document.createElement("div");
+    box.className="group";
+    box.innerHTML="<h3>"+names[gi]+"</h3>";
+    g.forEach((v,i)=>{
+      const row=document.createElement("div");
+      row.className="obs";
+      row.innerHTML='<input type="range" min="0" max="100" step="1" value="'+v+'" aria-label="'+names[gi]+' observation '+(i+1)+'"><input type="number" min="0" max="100" step="1" value="'+v+'">';
+      const range=row.children[0], num=row.children[1];
+      range.addEventListener("input",()=>{ data[gi][i]=Number(range.value); num.value=range.value; update(); });
+      num.addEventListener("input",()=>{ let x=Math.max(0,Math.min(100,Number(num.value)||0)); data[gi][i]=x; range.value=x; update(); });
+      box.appendChild(row);
+    });
+    root.appendChild(box);
+  });
+}
+
+function erf(x){
+  const sign=x<0?-1:1; x=Math.abs(x);
+  const a1=0.254829592,a2=-0.284496736,a3=1.421413741,a4=-1.453152027,a5=1.061405429,p=0.3275911;
+  const t=1/(1+p*x);
+  const y=1-(((((a5*t+a4)*t)+a3)*t+a2)*t+a1)*t*Math.exp(-x*x);
+  return sign*y;
+}
+function normalCDF(z){ return 0.5*(1+erf(z/Math.sqrt(2))); }
+
+/* Regularized incomplete beta via continued fraction. */
+function betacf(a,b,x){
+  const MAXIT=200, EPS=3e-8, FPMIN=1e-30;
+  let qab=a+b,qap=a+1,qam=a-1,c=1,d=1-qab*x/qap;
+  if(Math.abs(d)<FPMIN)d=FPMIN; d=1/d; let h=d;
+  for(let m=1;m<=MAXIT;m++){
+    let m2=2*m;
+    let aa=m*(b-m)*x/((qam+m2)*(a+m2));
+    d=1+aa*d; if(Math.abs(d)<FPMIN)d=FPMIN; c=1+aa/c; if(Math.abs(c)<FPMIN)c=FPMIN; d=1/d; h*=d*c;
+    aa=-(a+m)*(qab+m)*x/((a+m2)*(qap+m2));
+    d=1+aa*d; if(Math.abs(d)<FPMIN)d=FPMIN; c=1+aa/c; if(Math.abs(c)<FPMIN)c=FPMIN; d=1/d;
+    const del=d*c; h*=del;
+    if(Math.abs(del-1)<EPS) break;
+  }
+  return h;
+}
+function ibeta(a,b,x){
+  if(x<=0)return 0; if(x>=1)return 1;
+  const lnBeta=lgamma(a)+lgamma(b)-lgamma(a+b);
+  const front=Math.exp(a*Math.log(x)+b*Math.log(1-x)-lnBeta);
+  if(x<(a+1)/(a+b+2)) return front*betacf(a,b,x)/a;
+  return 1-front*betacf(b,a,1-x)/b;
+}
+function lgamma(z){
+  const cof=[76.18009172947146,-86.50532032941677,24.01409824083091,-1.231739572450155,0.001208650973866179,-0.000005395239384953];
+  let x=z, y=x, tmp=x+5.5; tmp-=(x+0.5)*Math.log(tmp); let ser=1.000000000190015;
+  for(let j=0;j<cof.length;j++){y+=1;ser+=cof[j]/y;}
+  return -tmp+Math.log(2.5066282746310005*ser/x);
+}
+function fCDF(f,d1,d2){ return ibeta(d1/2,d2/2,(d1*f)/(d1*f+d2)); }
+
+function calc(){
+  const all=data.flat(), N=all.length, k=data.length, gm=mean(all);
+  let ssb=0, ssw=0;
+  const rows=data.map(g=>{
+    const m=mean(g);
+    ssb += g.length*Math.pow(m-gm,2);
+    ssw += g.reduce((s,x)=>s+Math.pow(x-m,2),0);
+    return {n:g.length,m};
+  });
+  const dfb=k-1, dfw=N-k, msb=ssb/dfb, msw=ssw/dfw;
+  const f=msw===0 ? Infinity : msb/msw;
+  const p=msw===0 ? (msb===0?1:0) : 1-fCDF(f,dfb,dfw);
+  return {N,k,gm,ssb,ssw,dfb,dfw,msb,msw,f,p,rows};
+}
+function fmt(x){ return Number.isFinite(x)?x.toFixed(3):"∞"; }
+
+function update(){
+  const r=calc();
+  document.getElementById("grand").textContent=fmt(r.gm);
+  document.getElementById("f").textContent=fmt(r.f);
+  document.getElementById("p").textContent=r.p<0.001?"< .001":r.p.toFixed(4);
+  document.getElementById("anova").innerHTML=
+    "<tr><td>Between groups</td><td>"+fmt(r.ssb)+"</td><td>"+r.dfb+"</td><td>"+fmt(r.msb)+"</td><td>"+fmt(r.f)+"</td></tr>"+
+    "<tr><td>Within groups</td><td>"+fmt(r.ssw)+"</td><td>"+r.dfw+"</td><td>"+fmt(r.msw)+"</td><td>—</td></tr>"+
+    "<tr><td>Total</td><td>"+fmt(r.ssb+r.ssw)+"</td><td>"+(r.N-1)+"</td><td>—</td><td>—</td></tr>";
+  document.getElementById("conclusion").innerHTML = r.p<0.05
+    ? "<b>At α = .05:</b> Reject the null hypothesis. The data provide evidence that at least one population mean differs from another."
+    : "<b>At α = .05:</b> Fail to reject the null hypothesis. The data do not provide sufficient evidence that the population means differ.";
+  draw(r);
+}
+
+function draw(r){
+  const c=document.getElementById("plot"), ctx=c.getContext("2d");
+  const W=c.width,H=c.height; ctx.clearRect(0,0,W,H);
+  const L=55,R=20,T=20,B=38, pw=W-L-R, ph=H-T-B;
+  ctx.strokeStyle="#c7ccd5"; ctx.fillStyle="#667085"; ctx.font="12px Arial";
+  for(let y=0;y<=100;y+=20){
+    const py=T+ph-(y/100)*ph;
+    ctx.beginPath();ctx.moveTo(L,py);ctx.lineTo(W-R,py);ctx.stroke();
+    ctx.fillText(y,L-25,py+4);
+  }
+  const xs=[L+pw*0.2,L+pw*0.5,L+pw*0.8];
+  const jitter=[-18,-10,-3,5,13,20];
+  data.forEach((g,gi)=>{
+    const x=xs[gi], m=r.rows[gi].m, my=T+ph-(m/100)*ph;
+    ctx.strokeStyle="#20242b";ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(x-32,my);ctx.lineTo(x+32,my);ctx.stroke();
+    g.forEach((v,i)=>{
+      const y=T+ph-(v/100)*ph+jitter[i];
+      ctx.beginPath();ctx.arc(x,y,5,0,2*Math.PI);ctx.fillStyle="#20242b";ctx.fill();
+    });
+    ctx.fillStyle="#20242b";ctx.font="bold 13px Arial";ctx.textAlign="center";ctx.fillText(names[gi],x,H-15);
+    ctx.font="12px Arial";ctx.fillStyle="#667085";ctx.fillText("M = "+m.toFixed(2),x,my-9);
+  });
+  const gy=T+ph-(r.gm/100)*ph;
+  ctx.setLineDash([7,5]);ctx.strokeStyle="#667085";ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(L,gy);ctx.lineTo(W-R,gy);ctx.stroke();ctx.setLineDash([]);
+  ctx.textAlign="left";ctx.fillStyle="#667085";ctx.fillText("Grand mean = "+r.gm.toFixed(2),L+5,gy-7);
+}
+
+document.getElementById("randomize").addEventListener("click",()=>{
+  const centers=[30+Math.random()*15,45+Math.random()*15,60+Math.random()*15];
+  data=data.map((g,gi)=>g.map(()=>Math.round(Math.max(0,Math.min(100,centers[gi]+(Math.random()*18-9))))));
+  renderInputs(); update();
+});
+document.getElementById("reset").addEventListener("click",()=>{data=defaults.map(g=>[...g]);renderInputs();update();});
+renderInputs(); update();
+</script>
+</body>
+</html>
